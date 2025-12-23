@@ -1,3 +1,5 @@
+import random
+
 class Perceptron:
     def __init__(self, num_features: int, activation_function):
         self._num_features = num_features
@@ -25,6 +27,10 @@ class Perceptron:
         self._weights = weights.copy()
         self._bias = float(bias)
 
+    def randomize_parameters(self, low: float = -0.5, high: float = 0.5) -> None:
+        self._weights = [random.uniform(low, high) for _ in range(self._num_features)]
+        self._bias = random.uniform(low, high)
+
     def update_weights(self, delta_w: list[float]) -> None:
         if len(delta_w) != self._num_features:
             raise ValueError("delta_w length does not match num_features.")
@@ -45,5 +51,5 @@ class Perceptron:
         return s
 
     def predict(self, features: list[float]) -> int:
-        s = self.weighted_sum(features) + self._bias
-        return self._activation_function(s)
+        net = self.weighted_sum(features) + self._bias
+        return self._activation_function(net)

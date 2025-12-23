@@ -101,3 +101,15 @@ class Preprocessor:
             raise ValueError("Unknown label (not seen in training).")
 
         return self._label_to_id[label]
+
+    def enforce_binary_01(self, y_encoded: list[int]) -> list[int]:
+        unique_values = sorted(set(int(v) for v in y_encoded))
+
+        if unique_values == [0, 1]:
+            return [int(v) for v in y_encoded]
+
+        if len(unique_values) != 2:
+            raise ValueError("Binary classification requires exactly 2 classes.")
+
+        if any(v not in (0, 1) for v in unique_values):
+            raise ValueError("Binary labels must be in {0,1}.")
