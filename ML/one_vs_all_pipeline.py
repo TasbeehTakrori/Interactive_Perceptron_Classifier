@@ -18,10 +18,15 @@ class OneVsAllPipeline:
 
         self._perceptrons = {}
         self._class_ids = []
+        self._accuracy = 0.0
 
     @property
     def class_ids(self) -> list[int]:
         return self._class_ids.copy()
+
+    @property
+    def accuracy(self) -> float:
+        return float(self._accuracy)
 
     def train_one_vs_all(self, features: list[list[float]], labels: list) -> None:
         if len(features) == 0:
@@ -57,31 +62,41 @@ class OneVsAllPipeline:
 
             self._perceptrons[class_id] = perceptron
 
+        self._accuracy = self._compute_accuracy_from_normalized(x, y_ids)
+
     def predict(self, x_new: list[float]):
+        """Predict label (raw) for a raw input x_new."""
         if not self._perceptrons:
             raise ValueError("Model is not trained yet.")
 
-        x = self._preprocessor.transform_inputs([x_new])[0]
+        x_norm = self._preprocessor.transform_inputs([x_new])[0]
+        best_class_id = self._predict_id_from_normalized(x_norm)
+        return self._preprocessor.id_to_label.get(best_class_id, best_class_id)
 
+
+    def _predict_id_from_normalized(self, x_norm: list[float]) -> int:
         best_class = None
         best_score = None
 
         for class_id, model in self._perceptrons.items():
-            s = model.score(x)
+            s = model.score(x_norm)
             if best_score is None or s > best_score:
                 best_score = s
                 best_class = class_id
 
-        return self._preprocessor.id_to_label.get(best_class, best_class)
+        if best_class is None:
+            raise RuntimeError("Prediction failed.")
+        return int(best_class)
 
-    def accuracy(self, features: list[list[float]], labels: list) -> float:
-        if len(features) == 0:
+    def _compute_accuracy_from_normalized(self, X_norm: list[list[float]], y_ids: list[int]) -> float:
+        if len(X_norm) == 0:
             return 0.0
-        if len(features) != len(labels):
-            raise ValueError("features and labels must have the same length.")
+        if len(X_norm) != len(y_ids):
+            raise ValueError("X_norm and y_ids must have the same length.")
 
         correct = 0
-        for x, y in zip(features, labels):
-            if self.predict(x) == y:
+        for x_norm, y_id in zip(X_norm, y_ids):
+            pred_id = self._predict_id_from_normalized(x_norm)
+            if pred_id == int(y_id):
                 correct += 1
-        return correct / len(features)
+        return correct / len(X_norm)
