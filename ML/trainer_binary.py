@@ -1,16 +1,9 @@
 from Domain.perceptron import Perceptron
-from ML.preprocessor import Preprocessor
 
 
 class BinaryPerceptronTrainer:
-    def __init__(
-            self,
-            perceptron: Perceptron,
-            preprocessor: Preprocessor,
-            learning_rate: float,
-            max_epoch: int):
+    def __init__(self, perceptron: Perceptron, learning_rate: float, max_epoch: int):
         self._perceptron = perceptron
-        self._preprocessor = preprocessor
         self._learning_rate = learning_rate
         self._max_epoch = max_epoch
 
@@ -35,29 +28,31 @@ class BinaryPerceptronTrainer:
     def accuracy(self) -> float:
         return self._accuracy
 
-    def train(self, features: list[list[float]], labels: list) -> None:
-        if len(features) == 0:
+    def train(self, x: list[list[float]], y01: list[int], random_init: bool = True) -> None:
+        if len(x) == 0:
             return
-        if len(features) != len(labels):
-            raise ValueError("features and labels must have the same length.")
+        if len(x) != len(y01):
+            raise ValueError("X and y01 must have the same length.")
 
-        x = self._preprocessor.normalize_inputs(features)
-        y = self._preprocessor.encode_labels(labels)
-        self._validate_binary_labels(y)
+        self._validate_binary_labels(y01)
 
-        self._perceptron.randomize_parameters(-0.5, 0.5)
+        if random_init:
+            self._perceptron.randomize_parameters(-0.5, 0.5)
 
         self._num_updates = 0
         self._converged = False
+        self._num_epoch = 0
 
         for epoch in range(1, self._max_epoch + 1):
             errors_in_epoch = 0
 
             for i in range(len(x)):
                 x_i = x[i]
-                desired = y[i]
+                desired = int(y01[i])
 
                 actual = self._perceptron.predict(x_i)
+                if actual not in (0, 1):
+                    raise ValueError("Activation must output {0,1}.")
 
                 error = desired - actual
 
@@ -72,15 +67,12 @@ class BinaryPerceptronTrainer:
                 self._converged = True
                 break
 
-        self._accuracy = self._compute_accuracy(x, y)
+        self._accuracy = self._compute_accuracy(x, y01)
 
     def predict(self, x_new: list[float]) -> int:
-        x_fixed = self._preprocessor.transform_inputs([x_new])[0]
-        pred = self._perceptron.predict(x_fixed)
-
+        pred = self._perceptron.predict(x_new)
         if pred not in (0, 1):
             raise ValueError("Activation must output {0,1}.")
-
         return pred
 
     def _apply_update(self, x: list[float], error: int) -> None:
@@ -95,16 +87,14 @@ class BinaryPerceptronTrainer:
         self._perceptron.update_weights(delta_w)
         self._perceptron.update_bias(delta_b)
 
-    def _validate_binary_labels(self, y: list[int]) -> None:
-        if sorted(set(y)) != [0, 1]:
+    def _validate_binary_labels(self, y01: list[int]) -> None:
+        if sorted(set(int(v) for v in y01)) != [0, 1]:
             raise ValueError("Binary perceptron requires labels {0,1}.")
 
-    def _compute_accuracy(self, x: list[list[float]], y: list[int]) -> float:
+    def _compute_accuracy(self, x: list[list[float]], y01: list[int]) -> float:
         correct = 0
-
         for i in range(len(x)):
             pred = self._perceptron.predict(x[i])
-            if pred == y[i]:
+            if pred == int(y01[i]):
                 correct += 1
-
         return correct / len(x)

@@ -1,9 +1,11 @@
+import random
+
 from Utils.activations import step
 from Domain.perceptron import Perceptron
 from ML.preprocessor import Preprocessor
 from ML.trainer_binary import BinaryPerceptronTrainer
+from ML.binary_pipeline import BinaryPerceptronPipeline
 from Data.dataset_loader import load_csv_dataset
-import random
 from Data.registry import DATASETS
 
 
@@ -12,14 +14,10 @@ def run_dataset(name: str, path: str) -> None:
 
     p = Perceptron(num_features=len(X[0]), activation_function=step)
     prep = Preprocessor()
-    trainer = BinaryPerceptronTrainer(
-        perceptron=p,
-        preprocessor=prep,
-        learning_rate=0.1,
-        max_epoch=50
-    )
+    trainer = BinaryPerceptronTrainer(perceptron=p, learning_rate=0.1, max_epoch=50)
+    pipeline = BinaryPerceptronPipeline(preprocessor=prep, trainer=trainer)
 
-    trainer.train(X, y)
+    pipeline.fit(X, y)
 
     print("\n" + "=" * 45)
     print("Dataset:", name)
@@ -30,9 +28,9 @@ def run_dataset(name: str, path: str) -> None:
     print("Weights  :", p.weights)
     print("Bias     :", p.bias)
 
-    for xi, yi in zip(X, y):
-        pred = trainer.predict(xi)
-        print(f"X={xi} -> pred={pred}, y={yi}")
+    for xi, y_raw in zip(X, y):
+        pred_label = pipeline.predict(xi)
+        print(f"X={xi} -> pred={pred_label}, y={y_raw}")
 
 
 def main():

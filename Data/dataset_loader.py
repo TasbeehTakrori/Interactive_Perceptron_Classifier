@@ -16,6 +16,6 @@ def load_csv_dataset(file_path: str) -> tuple[list[list[float]], list]:
 
         for row in reader:
             X.append([float(row[c]) for c in feature_cols])
-            y.append(int(row[label_col]))
+            y.append(row[label_col])
 
         return X, y

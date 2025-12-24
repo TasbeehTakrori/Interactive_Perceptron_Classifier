@@ -69,7 +69,6 @@ class Preprocessor:
 
         return input_data_norm
 
-
     def encode_labels(self, y: list) -> list[int]:
         encoded = []
         for label in y:
@@ -81,7 +80,11 @@ class Preprocessor:
             raise ValueError("Numeric label must be an integer class id.")
 
         if isinstance(label, (int, float)):
-            return int(label)
+            v = int(label)
+            if v not in self._id_to_label:
+                self._id_to_label[v] = v
+                self._label_to_id[v] = v
+            return v
 
         if label not in self._label_to_id:
             new_id = len(self._label_to_id)
@@ -95,21 +98,12 @@ class Preprocessor:
             raise ValueError("Numeric label must be an integer class id.")
 
         if isinstance(label, (int, float)):
-            return int(label)
+            v = int(label)
+            if v not in self._id_to_label:
+                raise ValueError("Unknown label (not seen in training).")
+            return v
 
         if label not in self._label_to_id:
             raise ValueError("Unknown label (not seen in training).")
 
         return self._label_to_id[label]
-
-    def enforce_binary_01(self, y_encoded: list[int]) -> list[int]:
-        unique_values = sorted(set(int(v) for v in y_encoded))
-
-        if unique_values == [0, 1]:
-            return [int(v) for v in y_encoded]
-
-        if len(unique_values) != 2:
-            raise ValueError("Binary classification requires exactly 2 classes.")
-
-        if any(v not in (0, 1) for v in unique_values):
-            raise ValueError("Binary labels must be in {0,1}.")
