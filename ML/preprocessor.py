@@ -93,7 +93,7 @@ class Preprocessor:
 
         return self._label_to_id[label]
 
-    def transform_label(self, label) -> int:
+    def transform_label_to_id(self, label) -> int:
         if isinstance(label, float) and not label.is_integer():
             raise ValueError("Numeric label must be an integer class id.")
 
