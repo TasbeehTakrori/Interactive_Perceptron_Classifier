@@ -69,7 +69,6 @@ class InteractivePerceptronGUI:
     # ---------------- STYLE ----------------
 
     def _apply_modern_style(self):
-        # A few style tweaks to look cleaner without external libs.
         self._style.configure("Header.TLabel", font=("TkDefaultFont", 16, "bold"))
         self._style.configure("SubHeader.TLabel", font=("TkDefaultFont", 10))
         self._style.configure("Card.TLabelframe", padding=10)
@@ -262,7 +261,6 @@ class InteractivePerceptronGUI:
         self._refresh_test_entries(n)
 
     def _refresh_test_entries(self, num_features: int):
-        # Enable only needed entries
         for j, ent in enumerate(self._test_entries):
             if j < num_features:
                 ent.configure(state="normal")
@@ -433,7 +431,19 @@ class InteractivePerceptronGUI:
             return
 
         mode = self.var_mode.get()
+        act_name = self.var_activation.get()
         act = self._get_activation()
+
+        # IMPORTANT (correct behavior):
+        # OVA with Sign needs OneVsAllPipeline to map targets to {-1,+1}.
+        # If not implemented there, results will be wrong. So we block it in GUI.
+        if mode == "One-vs-All" and act_name == "Sign":
+            messagebox.showwarning(
+                "Not supported (yet)",
+                "One-vs-All with Sign requires updating OneVsAllPipeline to train with targets {-1,+1}.\n"
+                "Please switch Activation to Step for One-vs-All."
+            )
+            return
 
         # New training run => new preprocessor
         self._preprocessor = Preprocessor()
@@ -445,46 +455,55 @@ class InteractivePerceptronGUI:
         self._last_mode = mode
 
         self._log("=" * 70)
-        self._log(f"TRAIN | mode={mode} | lr={lr} | max_epoch={max_epoch} | activation={self.var_activation.get()}")
+        self._log(f"TRAIN | mode={mode} | lr={lr} | max_epoch={max_epoch} | activation={act_name}")
 
-        if mode == "Binary":
-            p = Perceptron(num_features=len(X[0]), activation_function=act)
-            trainer = BinaryPerceptronTrainer(perceptron=p, learning_rate=lr, max_epoch=max_epoch)
-            pipeline = BinaryPerceptronPipeline(preprocessor=self._preprocessor, trainer=trainer)
+        try:
+            if mode == "Binary":
+                p = Perceptron(num_features=len(X[0]), activation_function=act)
+                trainer = BinaryPerceptronTrainer(perceptron=p, learning_rate=lr, max_epoch=max_epoch)
+                pipeline = BinaryPerceptronPipeline(preprocessor=self._preprocessor, trainer=trainer)
 
-            # pipeline.fit will normalize internally using the same preprocessor
-            pipeline.fit(X, y)
+                pipeline.fit(X, y)
 
-            self._binary_pipeline = pipeline
-            self._ova_pipeline = None
+                self._binary_pipeline = pipeline
+                self._ova_pipeline = None
 
-            self.lbl_status.configure(
-                text=f"Status: Trained (Binary) | epochs={trainer.num_epoch} | updates={trainer.num_updates} | "
-                     f"converged={trainer.converged} | acc={trainer.accuracy:.3f}"
-            )
+                # extra info
+                label_mode = getattr(pipeline, "label_mode", None)
 
-            self._log(f"epochs={trainer.num_epoch}, updates={trainer.num_updates}, converged={trainer.converged}, acc={trainer.accuracy:.3f}")
-            self._log(f"weights={p.weights}")
-            self._log(f"bias={p.bias}")
+                self.lbl_status.configure(
+                    text=f"Status: Trained (Binary) | epochs={trainer.num_epoch} | updates={trainer.num_updates} | "
+                         f"converged={trainer.converged} | acc={trainer.accuracy:.3f}"
+                )
 
-        else:
-            ova = OneVsAllPipeline(
-                preprocessor=self._preprocessor,
-                learning_rate=lr,
-                max_epoch=max_epoch,
-                activation_function=act
-            )
+                self._log(f"label_mode={label_mode} (Step->01, Sign->±1)")
+                self._log(f"epochs={trainer.num_epoch}, updates={trainer.num_updates}, converged={trainer.converged}, acc={trainer.accuracy:.3f}")
+                self._log(f"weights={p.weights}")
+                self._log(f"bias={p.bias}")
 
-            ova.train_one_vs_all(X, y)
+            else:
+                ova = OneVsAllPipeline(
+                    preprocessor=self._preprocessor,
+                    learning_rate=lr,
+                    max_epoch=max_epoch,
+                    activation_function=act
+                )
 
-            self._ova_pipeline = ova
-            self._binary_pipeline = None
+                ova.train_one_vs_all(X, y)
 
-            self.lbl_status.configure(
-                text=f"Status: Trained (One-vs-All) | classes={len(ova.class_ids)} | acc={ova.accuracy:.3f}"
-            )
-            self._log(f"classes={len(ova.class_ids)} | acc={ova.accuracy:.3f}")
-            self._log(f"class_ids={ova.class_ids}")
+                self._ova_pipeline = ova
+                self._binary_pipeline = None
+
+                self.lbl_status.configure(
+                    text=f"Status: Trained (One-vs-All) | classes={len(ova.class_ids)} | acc={ova.accuracy:.3f}"
+                )
+                self._log(f"classes={len(ova.class_ids)} | acc={ova.accuracy:.3f}")
+                self._log(f"class_ids={ova.class_ids}")
+
+        except Exception as e:
+            messagebox.showerror("Training error", str(e))
+            self._log(f"ERROR: {e}")
+            return
 
         self._render_plot()
 
@@ -501,21 +520,26 @@ class InteractivePerceptronGUI:
                 messagebox.showerror("Invalid input", "Please enter numeric feature values for the test sample.")
                 return
 
-        if mode == "Binary":
-            if self._binary_pipeline is None:
-                messagebox.showwarning("Not trained", "Train the model first.")
-                return
-            pred_label = self._binary_pipeline.predict(vals)
-            self.lbl_pred.configure(text=f"Predicted: {pred_label}")
-            self._log(f"PREDICT(Binary): x={vals} -> {pred_label}")
+        try:
+            if mode == "Binary":
+                if self._binary_pipeline is None:
+                    messagebox.showwarning("Not trained", "Train the model first.")
+                    return
+                pred_label = self._binary_pipeline.predict(vals)
+                self.lbl_pred.configure(text=f"Predicted: {pred_label}")
+                self._log(f"PREDICT(Binary): x={vals} -> {pred_label}")
 
-        else:
-            if self._ova_pipeline is None:
-                messagebox.showwarning("Not trained", "Train the model first.")
-                return
-            pred_label = self._ova_pipeline.predict(vals)
-            self.lbl_pred.configure(text=f"Predicted: {pred_label}")
-            self._log(f"PREDICT(OVA): x={vals} -> {pred_label}")
+            else:
+                if self._ova_pipeline is None:
+                    messagebox.showwarning("Not trained", "Train the model first.")
+                    return
+                pred_label = self._ova_pipeline.predict(vals)
+                self.lbl_pred.configure(text=f"Predicted: {pred_label}")
+                self._log(f"PREDICT(OVA): x={vals} -> {pred_label}")
+
+        except Exception as e:
+            messagebox.showerror("Predict error", str(e))
+            self._log(f"ERROR: {e}")
 
     def _reset_model(self, clear_log=True):
         self._binary_pipeline = None
@@ -564,14 +588,12 @@ class InteractivePerceptronGUI:
             self.canvas.draw()
             return
 
-        # Always plot in normalized space using the SAME preprocessor (trained in pipeline)
-        # If model not trained yet, we can still show raw points without normalization,
-        # but here we expect plot after training.
         if self._binary_pipeline is None and self._ova_pipeline is None:
             self.ax.set_title("Plot (train first)")
             self.canvas.draw()
             return
 
+        # plot in normalized space using the SAME preprocessor
         X_norm = self._preprocessor.transform_inputs(X_raw)
 
         plot_mode = self.var_plot_mode.get()
@@ -597,7 +619,6 @@ class InteractivePerceptronGUI:
                 self._plot_line_for_model(model, label="boundary")
 
             if mode == "One-vs-All" and self._ova_pipeline is not None:
-                # multiple lines (each perceptron vs all)
                 for class_id, model in self._ova_pipeline._perceptrons.items():
                     lab = self._preprocessor.id_to_label.get(class_id, class_id)
                     self._plot_line_for_model(model, label=str(lab))
@@ -617,11 +638,9 @@ class InteractivePerceptronGUI:
 
         w1, w2 = float(w[0]), float(w[1])
 
-        # We plot in normalized space [0,1]
         xmin, xmax = 0.0, 1.0
 
         if abs(w2) < 1e-12:
-            # vertical: w1*x + b = 0 => x = -b/w1
             if abs(w1) < 1e-12:
                 return
             x0 = -b / w1
