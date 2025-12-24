@@ -50,6 +50,9 @@ class Perceptron:
             s += self._weights[i] * inputs[i]
         return s
 
+    def score(self, features: list[float]) -> float:
+        return self.weighted_sum(features) + self._bias
+
     def predict(self, features: list[float]) -> int:
-        net = self.weighted_sum(features) + self._bias
+        net = self.score(features)
         return self._activation_function(net)
