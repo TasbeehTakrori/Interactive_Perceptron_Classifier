@@ -1,6 +1,4 @@
-from pathlib import Path
-
-readme = """# Interactive Perceptron Classifier
+# Interactive Perceptron Classifier
 
 An educational yet fully functional implementation of the **Perceptron algorithm**, supporting:
 
