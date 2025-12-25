@@ -20,6 +20,9 @@ class OneVsAllPipeline:
         self._class_ids = []
         self._accuracy = 0.0
 
+        # optional: store per-class training stats
+        self._train_stats = {}  # class_id -> dict
+
     @property
     def class_ids(self) -> list[int]:
         return self._class_ids.copy()
@@ -27,6 +30,36 @@ class OneVsAllPipeline:
     @property
     def accuracy(self) -> float:
         return float(self._accuracy)
+
+    @property
+    def train_stats(self) -> dict:
+        return self._train_stats.copy()
+
+
+    def _activation_outputs(self) -> set[int]:
+        try:
+            a_neg = int(self._activation_function(-1.0))
+            a_pos = int(self._activation_function(+1.0))
+        except Exception as e:
+            raise ValueError(f"Activation function must return int outputs. Error: {e}")
+
+        return {a_neg, a_pos}
+
+    def _get_binary_targets_for_class(self, y_ids: list[int], class_id: int) -> list[int]:
+        outs = self._activation_outputs()
+
+        if outs == {0, 1}:
+            pos, neg = 1, 0
+        elif outs == {-1, 1}:
+            pos, neg = 1, -1
+        else:
+            raise ValueError(
+                f"Unsupported activation outputs: {outs}. "
+                "Expected {0,1} (Step) or {-1,1} (Sign)."
+            )
+
+        return [pos if int(y) == int(class_id) else neg for y in y_ids]
+
 
     def train_one_vs_all(self, features: list[list[float]], labels: list) -> None:
         if len(features) == 0:
@@ -43,9 +76,10 @@ class OneVsAllPipeline:
 
         num_features = len(x[0])
         self._perceptrons = {}
+        self._train_stats = {}
 
         for class_id in self._class_ids:
-            y01 = [1 if y == class_id else 0 for y in y_ids]
+            y_bin = self._get_binary_targets_for_class(y_ids, class_id)
 
             perceptron = Perceptron(
                 num_features=num_features,
@@ -58,21 +92,26 @@ class OneVsAllPipeline:
                 max_epoch=self._max_epoch
             )
 
-            trainer.train(x, y01, random_init=True)
-
+            trainer.train(x, y_bin, random_init=True)
             self._perceptrons[class_id] = perceptron
+
+            # optional stats (helpful for GUI)
+            self._train_stats[class_id] = {
+                "epochs": trainer.num_epoch,
+                "updates": trainer.num_updates,
+                "converged": trainer.converged,
+                "acc_binary": trainer.accuracy,
+            }
 
         self._accuracy = self._compute_accuracy_from_normalized(x, y_ids)
 
     def predict(self, x_new: list[float]):
-        """Predict label (raw) for a raw input x_new."""
         if not self._perceptrons:
             raise ValueError("Model is not trained yet.")
 
         x_norm = self._preprocessor.transform_inputs([x_new])[0]
         best_class_id = self._predict_id_from_normalized(x_norm)
         return self._preprocessor.id_to_label.get(best_class_id, best_class_id)
-
 
     def _predict_id_from_normalized(self, x_norm: list[float]) -> int:
         best_class = None
@@ -88,15 +127,15 @@ class OneVsAllPipeline:
             raise RuntimeError("Prediction failed.")
         return int(best_class)
 
-    def _compute_accuracy_from_normalized(self, X_norm: list[list[float]], y_ids: list[int]) -> float:
-        if len(X_norm) == 0:
+    def _compute_accuracy_from_normalized(self, x_norm: list[list[float]], y_ids: list[int]) -> float:
+        if len(x_norm) == 0:
             return 0.0
-        if len(X_norm) != len(y_ids):
+        if len(x_norm) != len(y_ids):
             raise ValueError("X_norm and y_ids must have the same length.")
 
         correct = 0
-        for x_norm, y_id in zip(X_norm, y_ids):
+        for x_norm, y_id in zip(x_norm, y_ids):
             pred_id = self._predict_id_from_normalized(x_norm)
             if pred_id == int(y_id):
                 correct += 1
-        return correct / len(X_norm)
+        return correct / len(x_norm)

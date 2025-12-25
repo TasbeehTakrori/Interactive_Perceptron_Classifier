@@ -6,7 +6,6 @@ import random
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-# --- Make imports work سواء شغلتيه كـ module أو كـ file ---
 if __package__ is None:
     ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     if ROOT not in sys.path:
@@ -28,15 +27,6 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 
 class InteractivePerceptronGUI:
-    """
-    Modern single-window GUI:
-    - Built-in datasets dropdown loads table immediately (no path needed)
-    - Training table supports 2..4 features
-    - Predict inputs auto-enabled based on feature count
-    - NO normalization in GUI (pipelines already normalize internally)
-    - Plot is in normalized space [0,1] (stable axes every train)
-    """
-
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Interactive Perceptron Classifier")
@@ -54,6 +44,7 @@ class InteractivePerceptronGUI:
         self._preprocessor = Preprocessor()
         self._binary_pipeline: BinaryPerceptronPipeline | None = None
         self._ova_pipeline: OneVsAllPipeline | None = None
+        self._last_test_point_norm = None
 
         # UI / data state
         self._current_num_features = 2
@@ -374,6 +365,7 @@ class InteractivePerceptronGUI:
         self.var_num_features.set(n_features)
         self._refresh_feature_columns(n_features)
         self._refresh_test_entries(n_features)
+        self._reset_model(clear_log=False)
 
         self._clear_table()
         for xi, yi in zip(X, y):
@@ -434,21 +426,11 @@ class InteractivePerceptronGUI:
         act_name = self.var_activation.get()
         act = self._get_activation()
 
-        # IMPORTANT (correct behavior):
-        # OVA with Sign needs OneVsAllPipeline to map targets to {-1,+1}.
-        # If not implemented there, results will be wrong. So we block it in GUI.
-        if mode == "One-vs-All" and act_name == "Sign":
-            messagebox.showwarning(
-                "Not supported (yet)",
-                "One-vs-All with Sign requires updating OneVsAllPipeline to train with targets {-1,+1}.\n"
-                "Please switch Activation to Step for One-vs-All."
-            )
-            return
-
         # New training run => new preprocessor
         self._preprocessor = Preprocessor()
         self._binary_pipeline = None
         self._ova_pipeline = None
+        self._last_test_point_norm = None
 
         self._last_train_X_raw = X
         self._last_train_y = y
@@ -456,6 +438,10 @@ class InteractivePerceptronGUI:
 
         self._log("=" * 70)
         self._log(f"TRAIN | mode={mode} | lr={lr} | max_epoch={max_epoch} | activation={act_name}")
+
+        if mode == "One-vs-All":
+            self._log(f"OVA targets will match activation ({act_name}): "
+                      f"{'{0,1}' if act_name == 'Step' else '{-1,+1}'}")
 
         try:
             if mode == "Binary":
@@ -468,16 +454,13 @@ class InteractivePerceptronGUI:
                 self._binary_pipeline = pipeline
                 self._ova_pipeline = None
 
-                # extra info
-                label_mode = getattr(pipeline, "label_mode", None)
-
                 self.lbl_status.configure(
                     text=f"Status: Trained (Binary) | epochs={trainer.num_epoch} | updates={trainer.num_updates} | "
                          f"converged={trainer.converged} | acc={trainer.accuracy:.3f}"
                 )
 
-                self._log(f"label_mode={label_mode} (Step->01, Sign->±1)")
-                self._log(f"epochs={trainer.num_epoch}, updates={trainer.num_updates}, converged={trainer.converged}, acc={trainer.accuracy:.3f}")
+                self._log(
+                    f"epochs={trainer.num_epoch}, updates={trainer.num_updates}, converged={trainer.converged}, acc={trainer.accuracy:.3f}")
                 self._log(f"weights={p.weights}")
                 self._log(f"bias={p.bias}")
 
@@ -490,6 +473,32 @@ class InteractivePerceptronGUI:
                 )
 
                 ova.train_one_vs_all(X, y)
+
+                self.lbl_status.configure(
+                    text=f"Status: Trained (One-vs-All) | classes={len(ova.class_ids)} | acc={ova.accuracy:.3f}"
+                )
+
+                self._log(f"classes={len(ova.class_ids)} | acc={ova.accuracy:.3f}")
+                self._log(f"class_ids={ova.class_ids}")
+
+                # --- NEW: show per-class training stats ---
+                stats = ova.train_stats
+                if stats:
+                    # summary
+                    epochs_list = [stats[c]["epochs"] for c in ova.class_ids]
+                    updates_list = [stats[c]["updates"] for c in ova.class_ids]
+                    conv_list = [1 if stats[c]["converged"] else 0 for c in ova.class_ids]
+
+                    self._log(f"OVA summary: avg_epochs={sum(epochs_list) / len(epochs_list):.2f}, "
+                              f"total_updates={sum(updates_list)}, "
+                              f"converged_models={sum(conv_list)}/{len(conv_list)}")
+
+                    # per-class lines
+                    for class_id in ova.class_ids:
+                        label = self._preprocessor.id_to_label.get(class_id, class_id)
+                        s = stats[class_id]
+                        self._log(f"  class={label} | epochs={s['epochs']} | updates={s['updates']} | "
+                                  f"converged={s['converged']} | acc_binary={s['acc_binary']:.3f}")
 
                 self._ova_pipeline = ova
                 self._binary_pipeline = None
@@ -536,6 +545,11 @@ class InteractivePerceptronGUI:
                 pred_label = self._ova_pipeline.predict(vals)
                 self.lbl_pred.configure(text=f"Predicted: {pred_label}")
                 self._log(f"PREDICT(OVA): x={vals} -> {pred_label}")
+            # store test point (normalized) for plotting
+            x_norm = self._preprocessor.transform_inputs([vals])[0]
+            self._last_test_point_norm = x_norm
+
+            self._render_plot()
 
         except Exception as e:
             messagebox.showerror("Predict error", str(e))
@@ -546,6 +560,7 @@ class InteractivePerceptronGUI:
         self._ova_pipeline = None
         self._last_train_X_raw = None
         self._last_train_y = None
+        self._last_test_point_norm = None
         self.lbl_status.configure(text="Status: Not trained yet.")
         self.lbl_pred.configure(text="Predicted: -")
         self._clear_plot()
@@ -627,7 +642,22 @@ class InteractivePerceptronGUI:
         self.ax.set_title(f"{title} (Normalized space 0..1)")
         self.ax.set_xlabel("x1 (norm)")
         self.ax.set_ylabel("x2 (norm)")
+
+        if self._last_test_point_norm is not None:
+            tx, ty = self._last_test_point_norm[0], self._last_test_point_norm[1]
+            self.ax.scatter(
+                [tx], [ty],
+                c="red",
+                marker="X",
+                s=160,
+                linewidths=2,
+                edgecolors="black",
+                zorder=10,
+                label="Test point"
+            )
+
         self.ax.legend(loc="best", fontsize=8)
+
         self.canvas.draw()
 
     def _plot_line_for_model(self, model: Perceptron, label: str):
