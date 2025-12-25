@@ -21,7 +21,7 @@ def test_one_vs_all_weather_activity():
 
     ova.train_one_vs_all(X, y)
 
-    acc = ova.accuracy(X, y)
+    acc = acc = ova.accuracy
 
     print("\n" + "=" * 45)
     print("Dataset : Weather -> Activity")
